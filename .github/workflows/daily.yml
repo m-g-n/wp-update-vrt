@@ -1,0 +1,125 @@
+name: daily
+on:
+  schedule:
+    # JST 04:41。キリの良い分は Actions の schedule が集中して大きく遅れる（wp-vuln-hub Issue #38）
+    - cron: '41 19 * * *'
+  workflow_dispatch:
+concurrency:
+  group: daily
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  prepare:
+    # managewp のエンドポイントができるまでは手動実行だけにする（Actions variable で切り替える）
+    if: github.event_name == 'workflow_dispatch' || vars.ENABLE_SCHEDULE == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node src/cli/prepare.mjs
+        env:
+          WORK_DIR: work
+          MANAGEWP_CANDIDATES_URL: ${{ secrets.MANAGEWP_CANDIDATES_URL }}
+          MANAGEWP_TOKEN: ${{ secrets.MANAGEWP_TOKEN }}
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          # work/ の組を含むファイルを封をする鍵。prepare と publish にだけ渡す（vrt は jobs.json と zips/ しか読まない）
+          WORK_ENCRYPTION_KEY: ${{ secrets.WORK_ENCRYPTION_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          # prepare は読むだけ。書き込みのキーは publish にだけ渡す
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_READ_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_READ_SECRET_ACCESS_KEY }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: work-prepare
+          path: work
+          # 公開リポジトリのアーティファクトは誰でも取得できる。組を含むファイルは封をしてあり、平文は jobs.json（ハッシュ）と zips/ だけ。残す期間は最短にする
+          retention-days: 1
+
+  vrt:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - uses: actions/download-artifact@v4
+        with:
+          name: work-prepare
+          path: work
+      # 他人のプラグインのコードを実行するジョブなので、secret を一切渡さない
+      - run: node src/cli/vrt.mjs
+        env:
+          WORK_DIR: work
+      # vrt 段が途中で落ちても、それまでに終わった結果は publish に渡す
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: work-vrt
+          path: work/vrt
+          retention-days: 1
+          if-no-files-found: ignore
+
+  publish:
+    needs: [prepare, vrt]
+    # vrt が丸ごと失敗しても、試行回数を数えてキューを進めるために走らせる
+    if: ${{ !cancelled() && needs.prepare.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: work-prepare
+          path: work
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: work-vrt
+          path: work/vrt
+      - run: node src/cli/publish.mjs
+        env:
+          WORK_DIR: work
+          WORK_ENCRYPTION_KEY: ${{ secrets.WORK_ENCRYPTION_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_WRITE_SECRET_ACCESS_KEY }}
+
+  notify:
+    needs: [prepare, vrt, publish]
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node src/cli/notify-failure.mjs
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

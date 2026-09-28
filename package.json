@@ -1,0 +1,32 @@
+{
+  "name": "wp-update-vrt",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "description": "WordPress プラグイン更新の見栄えリスク判定（Jev＋Playground VRT）",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test 'test/**/*.test.mjs'",
+    "test:vrt": "node --test --test-timeout=600000 'test-vrt/**/*.test.mjs'",
+    "prepare-stage": "node src/cli/prepare.mjs",
+    "vrt-stage": "node src/cli/vrt.mjs",
+    "publish-stage": "node src/cli/publish.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1141.0",
+    "@wp-playground/cli": "^3.1.56",
+    "acorn": "^8.18.0",
+    "acorn-jsx": "^5.3.2",
+    "adm-zip": "^0.6.1",
+    "diff": "^9.0.0",
+    "php-parser": "^3.7.0",
+    "pixelmatch": "^7.2.0",
+    "playwright": "^1.63.0",
+    "pngjs": "^7.0.0",
+    "postcss": "^8.5.28",
+    "postcss-selector-parser": "^7.1.6"
+  }
+}

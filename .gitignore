@@ -1,0 +1,5 @@
+node_modules/
+work/
+.local-store/
+local-candidates.json
+*.zip

@@ -54,7 +54,9 @@ describe('vrt 段の出力（子プロセス）', () => {
     await writeWorkFile(workDir, `zips/${H}-new.zip`, plugin('1.1.0', true))
 
     const { code, stdout, stderr } = await runChild(workDir)
-    assert.ok(stdout.includes('"event":"vrt_done"'), `vrt_done が無い (code ${code})`)
+    // 失敗したときに原因が分かるよう、子プロセスの出力の末尾を添える（スラッグは伏せる）
+    const tail = (s) => s.slice(-1500).replaceAll(SLUG, '<slug>').replaceAll('zz91q', '<slug>')
+    assert.ok(stdout.includes('"event":"vrt_done"'), `vrt_done が無い (code ${code})\nstdout: ${tail(stdout)}\nstderr: ${tail(stderr)}`)
     assert.ok(!stdout.includes(SLUG), 'stdout にスラッグが出ている')
     assert.ok(!stderr.includes(SLUG), 'stderr にスラッグが出ている')
     assert.ok(!stdout.includes('zz91q') && !stderr.includes('zz91q'))

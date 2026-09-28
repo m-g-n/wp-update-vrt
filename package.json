@@ -10,7 +10,7 @@
   },
   "scripts": {
     "test": "node --test 'test/**/*.test.mjs'",
-    "test:vrt": "node --test --test-timeout=600000 'test-vrt/**/*.test.mjs'",
+    "test:vrt": "node --test --test-concurrency=1 --test-timeout=600000 'test-vrt/**/*.test.mjs'",
     "prepare-stage": "node src/cli/prepare.mjs",
     "vrt-stage": "node src/cli/vrt.mjs",
     "publish-stage": "node src/cli/publish.mjs"

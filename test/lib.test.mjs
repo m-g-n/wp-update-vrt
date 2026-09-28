@@ -55,6 +55,22 @@ describe('log', () => {
     const lines = capture(() => reportFatal('prepare', new GuardError('input_sudden_empty')))
     assert.equal(JSON.parse(lines[1]).event, 'guard_input_sudden_empty')
   })
+  it('reportFatal は R2（S3）のエラーの HTTP ステータスと定型コードを出す', () => {
+    const err = Object.assign(new Error('Access Denied for secret-plugin'), {
+      name: 'AccessDenied',
+      $metadata: { httpStatusCode: 403 },
+    })
+    const lines = capture(() => reportFatal('publish', err))
+    assert.deepEqual(JSON.parse(lines[0]), { event: 'publish_failed', status: 403 })
+    assert.equal(JSON.parse(lines[1]).event, 'publish_error_access_denied')
+    assert.ok(!lines.join('\n').includes('secret-plugin'))
+  })
+  it('reportFatal は決まっていないエラー名を出さない', () => {
+    const err = Object.assign(new Error('x'), { name: 'SecretPluginError' })
+    const lines = capture(() => reportFatal('publish', err))
+    assert.equal(lines.length, 1)
+    assert.ok(!lines[0].includes('SecretPlugin'))
+  })
 })
 
 describe('todayJst', () => {

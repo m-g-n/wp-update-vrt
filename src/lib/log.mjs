@@ -25,8 +25,26 @@ export function log(event, fields = {}) {
   sink(JSON.stringify(out))
 }
 
+// 原因の見当を付けるために出してよいエラーの種類。R2（S3 互換 API）の定型コードと、JS の組み込みの型だけ。
+// ここに無い名前は出さない（名前にデータが入る余地を残さないため）
+const SAFE_ERROR_CODES = new Set([
+  'AccessDenied', 'InvalidAccessKeyId', 'SignatureDoesNotMatch', 'NoSuchBucket', 'InvalidBucketName',
+  'ExpiredToken', 'InvalidToken', 'Unauthorized', 'RequestTimeout', 'SlowDown', 'InternalError', 'ServiceUnavailable',
+  'TypeError', 'SyntaxError', 'RangeError',
+])
+
+const toSnake = (s) => s.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
+
+function statusOf(err) {
+  if (typeof err?.status === 'number') return err.status
+  // R2 のエラー（AWS SDK）は HTTP のステータスを $metadata に持つ
+  if (typeof err?.$metadata?.httpStatusCode === 'number') return err.$metadata.httpStatusCode
+  return null
+}
+
 // err.message にはスラッグや URL が入りうるので出さない
 export function reportFatal(stage, err) {
-  log(`${stage}_failed`, { status: typeof err?.status === 'number' ? err.status : null })
+  log(`${stage}_failed`, { status: statusOf(err) })
   if (err instanceof GuardError) log(`guard_${err.code}`)
+  else if (SAFE_ERROR_CODES.has(err?.name)) log(`${stage}_error_${toSnake(err.name)}`)
 }

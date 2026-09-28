@@ -26,6 +26,8 @@ secrets: `MANAGEWP_CANDIDATES_URL` `MANAGEWP_TOKEN` `TYPESAFE_API_KEY` `R2_ACCOU
 `R2_READ_ACCESS_KEY_ID` `R2_READ_SECRET_ACCESS_KEY` `R2_WRITE_ACCESS_KEY_ID` `R2_WRITE_SECRET_ACCESS_KEY` `SLACK_WEBHOOK_URL`
 `WORK_ENCRYPTION_KEY`
 
+`MANAGEWP_CANDIDATES_URL` は必ず `https://` で登録する（`https:` 以外なら prepare がトークンを送らずに止まる。http → https のリダイレクトではトークンを守れない）。
+
 `WORK_ENCRYPTION_KEY` は32バイトの base64（`openssl rand -base64 32`）。ジョブ間で受け渡す work/ は公開アーティファクトになるので、
 組（スラッグ・バージョン）を含む `records.sealed` `state-next.sealed` `pending/*.sealed` をこの鍵で AES-256-GCM の封をする。
 prepare と publish にだけ渡し、vrt ジョブには渡さない（他人のプラグインのコードを実行するジョブなので secret を持たせない。

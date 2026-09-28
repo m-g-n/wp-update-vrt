@@ -62,7 +62,8 @@ export async function runPrepare({ store, fetchCandidates, jevClient, fetchImpl 
     .map((x) => ({ ...x, hash: keyHash(x.key) }))
     .sort((a, b) => a.hash.localeCompare(b.hash))
 
-  const counts = { input: maintained.length, popular: popular.items.length, new: 0, deferred: 0, skipped: 0, selected: 0, not_selected: 0, download_error: 0, jev_error: 0 }
+  // 保守先由来の件数と定点観測の件数の内訳はログに出さない（公開ログから保守先の規模が読めてしまうため）
+  const counts = { new: 0, deferred: 0, skipped: 0, selected: 0, not_selected: 0, download_error: 0, jev_error: 0 }
   const maxNew = limits.maxNew ?? MAX_NEW_PER_RUN
   let jevFailStreak = 0
   const records = []

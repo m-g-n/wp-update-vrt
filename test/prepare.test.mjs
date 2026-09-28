@@ -66,6 +66,10 @@ describe('runPrepare', () => {
     assert.ok(lines.length > 0)
     assert.ok(!all.includes(SECRET))
     assert.ok(!all.includes('9.8.7'))
+    // 保守先由来と定点観測の件数の内訳も出さない（公開ログから保守先の規模が読めるため）
+    const done = lines.map((l) => JSON.parse(l)).find((e) => e.event === 'prepare_done')
+    assert.ok(done)
+    assert.ok(!('input' in done) && !('popular' in done))
   })
 
   it('閾値を超えた組は jobs と zip と pending に入る', async () => {

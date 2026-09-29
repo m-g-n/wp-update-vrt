@@ -4,7 +4,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { VrtError, vrtErrorCode, activationErrorCode } from '../src/vrt/errors.mjs'
+import { VrtError, vrtErrorCode, activationErrorCode, atStage } from '../src/vrt/errors.mjs'
 import { runVrtStage } from '../src/cli/vrt.mjs'
 import { writeWorkJSON, writeWorkFile } from '../src/lib/work.mjs'
 import { setLogSink } from '../src/lib/log.mjs'
@@ -20,6 +20,26 @@ describe('vrtErrorCode', () => {
   it('それ以外は unknown（名前やメッセージは使わない）', () => {
     assert.equal(vrtErrorCode(new Error('secret-plugin broke')), 'unknown')
     assert.equal(vrtErrorCode(null), 'unknown')
+  })
+})
+
+describe('atStage', () => {
+  const timeout = () => Object.assign(new Error('Timeout 60000ms exceeded. secret-plugin'), { name: 'TimeoutError' })
+  it('時間切れは、どの操作で止まったかを付けたコードにする', async () => {
+    await assert.rejects(atStage('editor', async () => { throw timeout() }), (e) => vrtErrorCode(e) === 'browser_timeout_editor')
+  })
+  it('VrtError はそのまま通す（内側で付けたコードを上書きしない）', async () => {
+    await assert.rejects(atStage('editor', async () => { throw new VrtError('editor_redirected') }), (e) => e.code === 'editor_redirected')
+  })
+  it('それ以外の例外もどの操作かだけを付け、メッセージは使わない', async () => {
+    await assert.rejects(atStage('probe', async () => { throw new Error('secret-plugin broke') }), (e) => {
+      assert.equal(vrtErrorCode(e), 'unknown_probe')
+      assert.ok(!e.message.includes('secret-plugin'))
+      return true
+    })
+  })
+  it('成功すればその値を返す', async () => {
+    assert.equal(await atStage('shot', async () => 42), 42)
   })
 })
 

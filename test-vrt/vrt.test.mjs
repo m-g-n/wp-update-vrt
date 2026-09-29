@@ -3,6 +3,7 @@ import { after, before, describe, it } from 'node:test'
 import { chromium } from 'playwright'
 
 import { runVrt } from '../src/vrt/run.mjs'
+import { vrtErrorCode } from '../src/vrt/errors.mjs'
 import { makeZip } from '../test/helpers/tree.mjs'
 
 // 色だけ変えたショートコードを出す架空のプラグイン。有効化時に出力する癖も入れておく（Review Focus 1）
@@ -58,6 +59,26 @@ wp.blocks.registerBlockType('vrt-blocks/broken', {
 `,
 })
 
+// 有効化の直後に管理画面を開くと、初期設定の画面へ転送する架空のプラグイン（人気のプラグインによくある作り）。
+// always なら毎回転送する
+const redirectPlugin = (version, { always = false } = {}) => makeZip('vrt-redirect', {
+  'vrt-redirect.php': `<?php
+/**
+ * Plugin Name: VRT Redirect
+ * Version: ${version}
+ */
+register_activation_hook(__FILE__, function () { update_option('vrt_redirect_pending', 1); });
+add_action('admin_init', function () {
+  if ($GLOBALS['pagenow'] === 'options-general.php') return;
+  if (!${always ? 'true' : "get_option('vrt_redirect_pending')"}) return;
+  delete_option('vrt_redirect_pending');
+  wp_safe_redirect(admin_url('options-general.php'));
+  exit;
+});
+add_shortcode('vrt_redirect_box', fn() => '<div style="width:200px;height:100px;background:red"></div>');
+`,
+})
+
 describe('runVrt（Playground＋Chromium）', () => {
   let browser
   before(async () => {
@@ -98,5 +119,18 @@ describe('runVrt（Playground＋Chromium）', () => {
     const r = await runVrt({ oldZip: blockPlugin('1.0.0', 'red', opts), newZip: blockPlugin('1.1.0', 'blue', opts) }, { browser, port: 9484 })
     assert.deepEqual(r.probe, { made: 1, from_example: 0, visible: 0 })
     assert.equal(r.status, 'no_surface')
+  })
+
+  it('初回だけ初期設定の画面へ転送されても、編集画面を開き直して続ける', async () => {
+    const r = await runVrt({ oldZip: redirectPlugin('1.0.0'), newZip: redirectPlugin('1.0.1') }, { browser, port: 9485 })
+    assert.equal(r.status, 'done')
+  })
+
+  it('毎回転送されるなら、どこで止まったかが分かるコードで失敗する（60秒待たない）', async () => {
+    const opts = { always: true }
+    await assert.rejects(
+      runVrt({ oldZip: redirectPlugin('1.0.0', opts), newZip: redirectPlugin('1.0.1', opts) }, { browser, port: 9486 }),
+      (e) => vrtErrorCode(e) === 'editor_redirected',
+    )
   })
 })

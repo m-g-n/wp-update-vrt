@@ -1,5 +1,6 @@
 import { runPhp, listShortcodes } from './playground.mjs'
 import { blockExternal, WIDTHS } from './capture.mjs'
+import { atStage, VrtError } from './errors.mjs'
 
 // ブロックの境目に置く印。表側で、印から次の印までに何か表示されたかを数える
 const PROBE_MARK = 'vrt-block-probe'
@@ -72,6 +73,29 @@ function visibleBlocks(mark) {
   })
 }
 
+const EDITOR_PATH = '/wp-admin/post-new.php'
+// 有効化の直後に管理画面を開くと、初期設定の画面へ転送するプラグインがある（たいてい最初の1回だけ）。
+// 編集画面に着かなければ、この回数まで開き直す
+const EDITOR_TRIES = 3
+
+// 編集画面を開き、ブロックの一覧が読めるまで待つ
+async function openEditor(page, serverUrl) {
+  const onEditor = () => new URL(page.url()).pathname === EDITOR_PATH
+  for (let i = 0; i < EDITOR_TRIES; i++) {
+    await page.goto(`${serverUrl}${EDITOR_PATH}?post_type=page`, { waitUntil: 'load', timeout: 60_000 })
+    // サーバー側で転送されたら、待たずに開き直す
+    if (!onEditor()) continue
+    try {
+      await page.waitForFunction(() => window.wp?.blocks?.getBlockTypes?.().length > 0, null, { timeout: 60_000 })
+      return
+    } catch (err) {
+      // 編集画面にいるのに読めないなら、開き直しても同じなので諦める。JS で転送されていたら開き直す
+      if (onEditor()) throw err
+    }
+  }
+  throw new VrtError('editor_redirected')
+}
+
 // テストページは旧版で作り、新版でもそのまま表示する。
 // 実サイトでも既存の記事は古い保存形式のまま残り、新しい CSS とレンダリングだけが効くため（spec §4.6）
 export async function createTestPages(site, browser, { coreTags }) {
@@ -93,18 +117,20 @@ vrt_out(wp_insert_post(['post_type' => 'page', 'post_status' => 'publish', 'post
   let made = { made: 0, fromExample: 0, id: null }
   let visible = 0
   try {
-    await page.goto(`${site.cli.serverUrl}/wp-admin/post-new.php?post_type=page`, { waitUntil: 'load', timeout: 60_000 })
-    await page.waitForFunction(() => window.wp?.blocks?.getBlockTypes?.().length > 0, null, { timeout: 60_000 })
-    made = await page.evaluate(`(${buildBlocksPage})(${JSON.stringify(PROBE_MARK)})`)
+    // 失敗したとき、どの段で止まったかをログに残す（src/vrt/errors.mjs）
+    await atStage('editor', () => openEditor(page, site.cli.serverUrl))
+    made = await atStage('blocks', () => page.evaluate(`(${buildBlocksPage})(${JSON.stringify(PROBE_MARK)})`))
     if (made.made > 0) {
       // 撮るのと同じ幅ごとに見る（狭い幅でだけ出るブロックもある）
       const seen = []
-      for (const width of WIDTHS) {
-        await page.setViewportSize({ width, height: 800 })
-        await page.goto(`${site.cli.serverUrl}/?page_id=${made.id}`, { waitUntil: 'load', timeout: 60_000 })
-        const flags = await page.evaluate(`(${visibleBlocks})(${JSON.stringify(PROBE_MARK)})`)
-        flags.forEach((v, i) => { seen[i] ||= v })
-      }
+      await atStage('probe', async () => {
+        for (const width of WIDTHS) {
+          await page.setViewportSize({ width, height: 800 })
+          await page.goto(`${site.cli.serverUrl}/?page_id=${made.id}`, { waitUntil: 'load', timeout: 60_000 })
+          const flags = await page.evaluate(`(${visibleBlocks})(${JSON.stringify(PROBE_MARK)})`)
+          flags.forEach((v, i) => { seen[i] ||= v })
+        }
+      })
       visible = seen.filter(Boolean).length
     }
   } finally {

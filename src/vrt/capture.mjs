@@ -1,3 +1,5 @@
+import { atStage } from './errors.mjs'
+
 export const WIDTHS = [1280, 375]
 const MAX_HEIGHT = 10_000
 const FREEZE_CSS = '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}'
@@ -51,7 +53,7 @@ export async function openCapturer(browser, serverUrl) {
   })
   return {
     jsErrors,
-    async shot(path, width) {
+    shot: (path, width) => atStage('shot', async () => {
       await page.setViewportSize({ width, height: 800 })
       await page.goto(serverUrl + path, { waitUntil: 'networkidle', timeout: 60_000 })
       await page.addStyleTag({ content: FREEZE_CSS })
@@ -60,7 +62,7 @@ export async function openCapturer(browser, serverUrl) {
       // 無限スクロールなどで極端に長いページは上から MAX_HEIGHT までにする
       if (height > MAX_HEIGHT) return page.screenshot({ fullPage: true, clip: { x: 0, y: 0, width, height: MAX_HEIGHT } })
       return page.screenshot({ fullPage: true })
-    },
+    }),
     close: () => context.close(),
   }
 }

@@ -26,6 +26,18 @@ export function activationErrorCode(wpCode) {
   return WP_ACTIVATION_CODES.has(wpCode) ? `activate_${wpCode}` : 'activate_other'
 }
 
+// ブラウザの操作を段ごとに包み、失敗したときにどの段で止まったかをコードに残す。
+// stage は決まった語（editor / blocks / probe / shot）だけを渡す。元の例外のメッセージは使わない
+export async function atStage(stage, fn) {
+  try {
+    return await fn()
+  } catch (err) {
+    if (err instanceof VrtError) throw err
+    if (err?.name === 'TimeoutError') throw new VrtError(`browser_timeout_${stage}`, { cause: err })
+    throw new VrtError(`unknown_${stage}`, { cause: err })
+  }
+}
+
 export function vrtErrorCode(err) {
   if (err instanceof VrtError) return err.code
   if (err?.name === 'TimeoutError') return 'browser_timeout'

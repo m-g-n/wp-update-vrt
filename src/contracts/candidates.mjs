@@ -5,6 +5,10 @@ export const CANDIDATES_SCHEMA_VERSION = 1
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/
 const VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+-]*$/
 
+// 定点観測の組にも同じ規則を当てる（結果を取り込む managewp が、どの組も同じ形だと前提にできるように）
+export const isValidSlug = (s) => typeof s === 'string' && SLUG_RE.test(s)
+export const isValidVersion = (v) => typeof v === 'string' && VERSION_RE.test(v)
+
 // エラーメッセージには添字だけを入れる（スラッグをログに出さないため）
 export function parseCandidates(json) {
   if (json?.schema_version !== CANDIDATES_SCHEMA_VERSION) {

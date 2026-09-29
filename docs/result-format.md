@@ -17,7 +17,7 @@
 |---|---|
 | `key` | `slug@from→to` |
 | `key_hash` | `key` の sha256 の先頭16桁 |
-| `slug` / `from` / `to` | |
+| `slug` / `from` / `to` | `docs/update-candidates-format.md` と同じ形（`slug` は `^[a-z0-9][a-z0-9-]*$`、`from` / `to` は `^[0-9A-Za-z][0-9A-Za-z.+-]*$`）。人気プラグインの定点観測の組も同じ規則で絞っている |
 | `signals` | 静的な信号 |
 | `jev` | `emits_markup` / `runs_on_front` / `mutates_dom` / `js_front_dom`（Noul の値。confidence は無い）、`model`、`hunks_sent`、`error`（`network` / `bad_response` / `http_NNN` / `circuit_open`（その回は失敗が続いたので聞かなかった））、`large_diff` |
 | `risk_score_static` / `risk_score` | 0〜1。較正前なので確率ではない |

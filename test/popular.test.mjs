@@ -18,6 +18,24 @@ describe('diffPopular', () => {
     const { next } = diffPopular({ gone: '1.0' }, [])
     assert.deepEqual(next, { gone: '1.0' })
   })
+  it('前回の版が契約の形でなければ、組にしない（記録は今回の版に進める）', () => {
+    const { items, next } = diffPopular({ a: '1.0 beta' }, [{ slug: 'a', version: '1.1' }])
+    assert.deepEqual(items, [])
+    assert.deepEqual(next, { a: '1.1' })
+  })
+})
+
+describe('fetchPopular の形の検査', () => {
+  it('スラッグや版番号が A の契約の形に合わないものは取らない', async () => {
+    const plugins = [
+      { slug: 'ok-plugin', version: '1.2.3' },
+      { slug: 'Bad_Slug', version: '1.0' },
+      { slug: 'space-ver', version: '1.0 beta' },
+      { slug: 'ctrl-ver', version: '1.0\n2' },
+    ]
+    const fetchImpl = async () => new Response(JSON.stringify({ info: { pages: 1 }, plugins }), { status: 200 })
+    assert.deepEqual(await fetchPopular(10, { fetchImpl }), [{ slug: 'ok-plugin', version: '1.2.3' }])
+  })
 })
 
 describe('fetchPopular', () => {

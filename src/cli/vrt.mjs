@@ -70,8 +70,11 @@ export async function runVrtStage({ workDir, runOne, portBase = 9400, timeoutMs 
         counts.error++
         continue
       }
+      // テストページに置けたブロックの数は、表示できなかったものがどれだけあるかを見るためにログにだけ出す
+      const { probe, ...vrt } = result
+      if (probe) log('vrt_blocks', { key_hash, made: probe.made, from_example: probe.from_example, visible: probe.visible })
       const pages = []
-      for (const p of result.pages) {
+      for (const p of vrt.pages) {
         const images = {}
         for (const kind of ['old', 'new', 'diff']) {
           const name = `${p.page}-${p.width}-${kind}.png`
@@ -80,8 +83,8 @@ export async function runVrtStage({ workDir, runOne, portBase = 9400, timeoutMs 
         }
         pages.push({ ...p, images })
       }
-      await writeWorkJSON(workDir, `vrt/${key_hash}/result.json`, { ...result, pages })
-      counts[result.status] = (counts[result.status] ?? 0) + 1
+      await writeWorkJSON(workDir, `vrt/${key_hash}/result.json`, { ...vrt, pages })
+      counts[vrt.status] = (counts[vrt.status] ?? 0) + 1
     }
   } finally {
     await runner.close()

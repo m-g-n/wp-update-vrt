@@ -6,6 +6,7 @@ import { join } from 'node:path'
 
 import { runVrtStage, vrtAllFailed } from '../src/cli/vrt.mjs'
 import { writeWorkJSON, writeWorkFile, readWorkJSON, workExists } from '../src/lib/work.mjs'
+import { setLogSink } from '../src/lib/log.mjs'
 
 const H = 'abcdef0123456789'
 
@@ -69,6 +70,23 @@ describe('runVrtStage', () => {
     }
     await runVrtStage({ workDir, runOne, timeoutMs: 1000 })
     assert.equal(signal.aborted, false)
+  })
+  it('ブロックの数はログにだけ出し、結果には書かない（結果の形を変えないため）', async () => {
+    const workDir = await setup()
+    const runOne = async () => ({
+      status: 'no_surface', reason: null, env: null, noise_floor: 0, pages: [], errors_new: { php: [], js: [] }, vrt_changed: false,
+      probe: { made: 3, from_example: 1, visible: 0 },
+    })
+    const lines = []
+    const prev = setLogSink((l) => lines.push(JSON.parse(l)))
+    try {
+      await runVrtStage({ workDir, runOne })
+    } finally {
+      setLogSink(prev)
+    }
+    assert.deepEqual(lines.find((l) => l.event === 'vrt_blocks'), { event: 'vrt_blocks', key_hash: H, made: 3, from_example: 1, visible: 0 })
+    const r = await readWorkJSON(workDir, `vrt/${H}/result.json`)
+    assert.equal('probe' in r, false)
   })
 })
 

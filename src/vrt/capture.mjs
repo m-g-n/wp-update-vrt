@@ -34,10 +34,15 @@ const isLocal = (url) => {
   return hostname === '127.0.0.1' || hostname === 'localhost'
 }
 
+// ブラウザ側でも外部への通信を止める（CDN のフォントや広告で揺れないように）。
+// テストページを作るコンテキスト（src/vrt/pages.mjs）も同じものを使う
+export async function blockExternal(context) {
+  await context.route('**/*', (route) => (isLocal(route.request().url()) ? route.continue() : route.abort()))
+}
+
 export async function openCapturer(browser, serverUrl) {
   const context = await browser.newContext()
-  // ブラウザ側でも外部への通信を止める（CDN のフォントや広告で揺れないように）
-  await context.route('**/*', (route) => (isLocal(route.request().url()) ? route.continue() : route.abort()))
+  await blockExternal(context)
   const page = await context.newPage()
   const jsErrors = []
   page.on('pageerror', (e) => jsErrors.push(String(e.message).slice(0, MAX_LINE)))

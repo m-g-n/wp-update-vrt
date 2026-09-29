@@ -23,7 +23,7 @@ export async function runVrt({ oldZip, newZip }, { browser, port, signal }) {
     signal?.throwIfAborted()
     const coreTags = await listShortcodes(site)
     await installPlugin(site, oldZip, 'old')
-    const { pages, hasSurface } = await createTestPages(site, browser, { coreTags })
+    const { pages, hasSurface, probe } = await createTestPages(site, browser, { coreTags })
     cap = await openCapturer(browser, site.cli.serverUrl)
     try {
       signal?.throwIfAborted()
@@ -63,6 +63,8 @@ export async function runVrt({ oldZip, newZip }, { browser, port, signal }) {
         pages: results,
         errors_new: newErrors(beforeErrors, { php: await debugLogLines(site, logOffset), js: cap.jsErrors.slice(jsOffset) }),
         vrt_changed: verdict.vrt_changed,
+        // 結果には書かず、vrt 段のログにだけ数を出す（src/cli/vrt.mjs）
+        probe,
       }
     } finally {
       await cap.close()

@@ -1,9 +1,11 @@
 // 判定と選択の数字はここにだけ置く。値を変えたら POLICY_VERSION を上げる
 // （結果にどの重みで出したかを残し、較正（spec 2）で版ごとに分けて見られるようにするため）
-export const POLICY_VERSION = 1
+export const POLICY_VERSION = 2
 
-// 初期はデータを貯めるのが目的なので、わざと低めにして VRT に多く回す
-export const THRESHOLD = 0.3
+// 版 1 は 0.3（データを貯めるため、わざと低くした）。2026-09-29 の実績で 84件中 63件（75%）が VRT に回り、
+// 1日の上限（DAILY_VRT_LIMIT）を大きく超えて順番待ちが溜まったので、版 2 で 0.8 に上げた。
+// この日に vrt_changed だった3件の risk_score は 0.99 / 0.83 / 0.83。閾値未満の見逃しは SAMPLE_RATE の抜き取りで測る
+export const THRESHOLD = 0.8
 // 閾値未満からの抜き取り。これが無いと見逃し率が測れない（spec §4.5）
 export const SAMPLE_RATE = 0.1
 export const SAMPLE_RATE_VERSION_ONLY = 0.02

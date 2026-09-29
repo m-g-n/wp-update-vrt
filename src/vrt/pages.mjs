@@ -1,4 +1,5 @@
 import { runPhp, listShortcodes } from './playground.mjs'
+import { blockExternal, WIDTHS } from './capture.mjs'
 
 // ブロックの境目に置く印。表側で、印から次の印までに何か表示されたかを数える
 const PROBE_MARK = 'vrt-block-probe'
@@ -9,45 +10,45 @@ const PROBE_MARK = 'vrt-block-probe'
 // JS の registerBlockType() に書かれていることもあるが、getBlockTypes() ならどちらも読める
 async function buildBlocksPage(mark) {
   const api = window.wp.blocks
-  const blocks = []
+  // 作る・serialize するのを1つずつ試す（1つの失敗でページ全体を落とさない）。
+  // いまの WordPress は save() の例外を serialize の中で握るが、それに頼らない
+  const tryHtml = (make) => {
+    try {
+      return api.serialize([make()])
+    } catch {
+      return null
+    }
+  }
+  const parts = []
   let fromExample = 0
   for (const type of api.getBlockTypes()) {
     if (type.name.startsWith('core/')) continue
-    let block = null
+    let html = null
     if (type.example) {
-      try {
-        block = api.getBlockFromExample
-          ? api.getBlockFromExample(type.name, type.example)
-          : api.createBlock(type.name, type.example.attributes ?? {},
-            api.createBlocksFromInnerBlocksTemplate(type.example.innerBlocks ?? []))
-        fromExample++
-      } catch {
-        block = null
-      }
+      html = tryHtml(() => (api.getBlockFromExample
+        ? api.getBlockFromExample(type.name, type.example)
+        : api.createBlock(type.name, type.example.attributes ?? {},
+          api.createBlocksFromInnerBlocksTemplate(type.example.innerBlocks ?? []))))
+      if (html !== null) fromExample++
     }
-    if (!block) {
-      try {
-        block = api.createBlock(type.name)
-      } catch {
-        // 既定の attributes でも作れないブロックは飛ばす
-        continue
-      }
-    }
-    blocks.push(block)
+    // 既定の attributes でも作れないブロックは飛ばす
+    html ??= tryHtml(() => api.createBlock(type.name))
+    if (html !== null) parts.push(html)
   }
-  if (blocks.length === 0) return { made: 0, fromExample: 0, id: null }
+  if (parts.length === 0) return { made: 0, fromExample: 0, id: null }
   // 印は HTML のコメントとしてブロックの外に置く（ブロックが1つでもあれば wpautop は効かないので残る）
-  const content = blocks.map((b) => `<!--${mark}-->\n${api.serialize([b])}`).join('\n')
+  const content = parts.map((html) => `<!--${mark}-->\n${html}`).join('\n')
   const res = await window.wp.apiFetch({
     path: '/wp/v2/pages',
     method: 'POST',
     data: { title: 'VRT blocks', content, status: 'publish' },
   })
-  return { made: blocks.length, fromExample, id: res.id }
+  return { made: parts.length, fromExample, id: res.id }
 }
 
-// 表側の blocks ページの中で動かす。印ごとに、次の印までに大きさのある要素か文字があるかを見る
-function countVisibleBlocks(mark) {
+// 表側の blocks ページの中で動かす。印ごとに、次の印までに大きさのある要素か文字があるかを見る。
+// 印の順に真偽値の配列を返す（幅ごとに見て、どれかの幅で見えたブロックを数えるため）
+function visibleBlocks(mark) {
   const marks = []
   const it = document.createNodeIterator(document.body, NodeFilter.SHOW_COMMENT)
   for (let n = it.nextNode(); n; n = it.nextNode()) if (n.data.trim() === mark) marks.push(n)
@@ -63,16 +64,12 @@ function countVisibleBlocks(mark) {
     return [node, ...node.querySelectorAll('*')].some((el) => hasBox(el.getBoundingClientRect()))
   }
   const markSet = new Set(marks)
-  let visible = 0
-  for (const m of marks) {
+  return marks.map((m) => {
     for (let n = m.nextSibling; n && !markSet.has(n); n = n.nextSibling) {
-      if (isVisible(n)) {
-        visible++
-        break
-      }
+      if (isVisible(n)) return true
     }
-  }
-  return visible
+    return false
+  })
 }
 
 // テストページは旧版で作り、新版でもそのまま表示する。
@@ -90,7 +87,8 @@ vrt_out(wp_insert_post(['post_type' => 'page', 'post_status' => 'publish', 'post
     pages.push({ name: 'shortcodes', path: `/?page_id=${id}` })
   }
 
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+  const context = await browser.newContext()
+  await blockExternal(context)
   const page = await context.newPage()
   let made = { made: 0, fromExample: 0, id: null }
   let visible = 0
@@ -99,8 +97,15 @@ vrt_out(wp_insert_post(['post_type' => 'page', 'post_status' => 'publish', 'post
     await page.waitForFunction(() => window.wp?.blocks?.getBlockTypes?.().length > 0, null, { timeout: 60_000 })
     made = await page.evaluate(`(${buildBlocksPage})(${JSON.stringify(PROBE_MARK)})`)
     if (made.made > 0) {
-      await page.goto(`${site.cli.serverUrl}/?page_id=${made.id}`, { waitUntil: 'load', timeout: 60_000 })
-      visible = await page.evaluate(`(${countVisibleBlocks})(${JSON.stringify(PROBE_MARK)})`)
+      // 撮るのと同じ幅ごとに見る（狭い幅でだけ出るブロックもある）
+      const seen = []
+      for (const width of WIDTHS) {
+        await page.setViewportSize({ width, height: 800 })
+        await page.goto(`${site.cli.serverUrl}/?page_id=${made.id}`, { waitUntil: 'load', timeout: 60_000 })
+        const flags = await page.evaluate(`(${visibleBlocks})(${JSON.stringify(PROBE_MARK)})`)
+        flags.forEach((v, i) => { seen[i] ||= v })
+      }
+      visible = seen.filter(Boolean).length
     }
   } finally {
     await context.close()

@@ -27,8 +27,12 @@
 | `selection` | `{ "stratum": "forced|above|sample|sample_version_only", "rate": 0.1 }` |
 | `vrt` | 下記 |
 
-`vrt.reason` が `not_on_wporg`（WordPress.org に無い）または `unreadable_zip`（zip を読めない）の組は、中身を見ていないので
+`vrt.reason` が `not_on_wporg` または `unreadable_zip`（zip を読めない）の組は、中身を見ていないので
 `signals` `jev` `risk_score_static` `risk_score` `theme_override_risk` `selection` がすべて `null` になる。
+
+`not_on_wporg` は「その版の zip を WordPress.org から取得できなかった（404）」という意味で、プラグインそのものについての情報ではない。
+有料版のほか、自社で改変した版や開発版など、WordPress.org で配布されていない版も含む。表示では
+「WordPress.org に無いプラグイン」と言い切らず、「この版は WordPress.org から取得できず、判定していない」のように版について書くこと。
 
 ## vrt
 

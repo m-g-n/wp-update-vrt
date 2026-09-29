@@ -15,9 +15,18 @@ import { makeZip } from './helpers/tree.mjs'
 
 const SECRET = 'secret-fixture-plugin'
 const KEY = randomBytes(32).toString('base64')
+// 見た目に効く変更をまとめて入れ、Jev が止まって静的なスコアだけになっても閾値（0.8）を超える組にする。
+// 表示を出す PHP を3ファイル・CSS の宣言を5つ・表側の JS を変える
+const risky = (cls, color, n) => makeZip(SECRET, {
+  'p.php': `<?php\necho '<a class="${cls}">';\n`,
+  'q.php': `<?php\necho '<b class="${cls}">';\n`,
+  'r.php': `<?php\necho '<i class="${cls}">';\n`,
+  'a.css': `.${cls}{color:${color};margin:${n}px;padding:${n}px;border-width:${n}px;font-size:${n}px}`,
+  'f.js': `document.body.dataset.v = '${n}'`,
+})
 const zips = {
-  [`${SECRET}.9.8.7`]: makeZip(SECRET, { 'p.php': "<?php\necho '<a class=\"x\">';\n", 'a.css': '.x{color:red}' }),
-  [`${SECRET}.9.8.8`]: makeZip(SECRET, { 'p.php': "<?php\necho '<a class=\"y\">';\n", 'a.css': '.y{color:blue}' }),
+  [`${SECRET}.9.8.7`]: risky('x', 'red', 1),
+  [`${SECRET}.9.8.8`]: risky('y', 'blue', 2),
   'broken-plugin.1.0': makeZip('other-folder', { 'p.php': '<?php' }),
   'broken-plugin.1.1': makeZip('other-folder', { 'p.php': '<?php' }),
 }

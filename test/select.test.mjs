@@ -17,8 +17,8 @@ describe('stratumOf', () => {
     assert.equal(stratumOf({ signals: sig({ unsanitized_files: 1 }), jev: jev(), risk_score: 0 }).stratum, 'forced')
     assert.equal(stratumOf({ signals: sig({ registrations_diff: { blocks_changed: ['a/b'], shortcodes_added: [], shortcodes_removed: [] } }), jev: jev(), risk_score: 0 }).stratum, 'forced')
     assert.deepEqual(stratumOf({ signals: sig({ version_only: true }), jev: jev(), risk_score: 0.02 }), { stratum: 'sample_version_only', rate: 0.02 })
-    assert.deepEqual(stratumOf({ signals: sig(), jev: jev(), risk_score: 0.3 }), { stratum: 'above', rate: 1 })
-    assert.deepEqual(stratumOf({ signals: sig(), jev: jev(), risk_score: 0.29 }), { stratum: 'sample', rate: 0.1 })
+    assert.deepEqual(stratumOf({ signals: sig(), jev: jev(), risk_score: 0.8 }), { stratum: 'above', rate: 1 })
+    assert.deepEqual(stratumOf({ signals: sig(), jev: jev(), risk_score: 0.79 }), { stratum: 'sample', rate: 0.1 })
   })
   it('Jev がエラーでも強制にはしない（止まった日に上限を使い切らないため）', () => {
     assert.equal(stratumOf({ signals: sig(), jev: jev({ error: 'http_529' }), risk_score: 0.1 }).stratum, 'sample')

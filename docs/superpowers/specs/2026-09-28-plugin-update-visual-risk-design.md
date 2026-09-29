@@ -121,7 +121,7 @@ Jev を呼ぶのは段 3 だけ、Playground を使うのは段 6 だけ。
 | 区分（`stratum`） | 条件 | VRT に回す割合 |
 |---|---|---|
 | `forced` | `large_diff`、`registrations_diff` が空でない、またはコメントを取り除けなかったファイルがある（`unsanitized_files` > 0） | 100% |
-| `above` | `risk_score` ≥ T（初期値 0.3） | 100% |
+| `above` | `risk_score` ≥ T（版 2 で 0.8。版 1 は 0.3） | 100% |
 | `sample` | 閾値未満 | 10% |
 | `sample_version_only` | `version_only` | 2% |
 
@@ -285,7 +285,7 @@ vrt                status（done / skipped / no_surface / failed / flaky / queue
 
 | 項目 | 値 | 根拠 |
 |---|---|---|
-| 閾値 T | 0.3 | 初期はデータを貯めるため、わざと低くする |
+| 閾値 T | 0.8（版 2） | 版 1 の 0.3 では 75% が VRT に回り、1日の上限を超えて順番待ちが溜まった（2026-09-29） |
 | 抜き取り率 | 10% / 2%（`version_only`） | 見逃し率の推定に必要な件数を確保する |
 | 1日の VRT 上限 | 30件 | 実測で起動約7秒・旧版→新版の更新と撮影込みで1件1分前後。公開リポジトリなので Actions の分数は無料 |
 | 塊の上限 | 40 | 大きな書き換えは予測が当たりにくく、費用も膨らむ |

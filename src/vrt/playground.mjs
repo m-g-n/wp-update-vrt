@@ -1,5 +1,7 @@
 import { runCLI } from '@wp-playground/cli'
 
+import { VrtError, activationErrorCode } from './errors.mjs'
+
 export const PHP_VERSION = '8.2'
 export const THEME = 'twentytwentyfive'
 const DEBUG_LOG = '/tmp/wp-debug.log'
@@ -18,7 +20,8 @@ add_filter('show_admin_bar', '__return_false');
 // プラグインが有効化時などに何かを出力しても取り違えないよう、印の後ろだけを読む
 export function parseMarked(text) {
   const i = text.lastIndexOf(MARK)
-  if (i < 0) throw new Error('PHP の実行結果に印が無い')
+  // 印が出ないのは、ほぼ PHP の致命的なエラーで処理が途中で止まったとき
+  if (i < 0) throw new VrtError('php_no_marker')
   return JSON.parse(text.slice(i + MARK.length))
 }
 
@@ -33,16 +36,12 @@ ${body}`
 }
 
 export async function bootSite({ port }) {
-  const cli = await runCLI({
-    command: 'server',
-    php: PHP_VERSION,
-    wp: 'latest',
-    login: true,
-    port,
-    verbosity: 'quiet',
-    'define-bool': { WP_DEBUG: true, WP_DEBUG_DISPLAY: false },
-    define: { WP_DEBUG_LOG: DEBUG_LOG },
-  })
+  let cli
+  try {
+    cli = await startCli({ port })
+  } catch (err) {
+    throw new VrtError('boot_failed', { cause: err })
+  }
   const site = { cli, env: null }
   try {
     await cli.playground.mkdir('/wordpress/wp-content/mu-plugins')
@@ -53,15 +52,31 @@ vrt_out(['wp' => get_bloginfo('version'), 'php' => '${PHP_VERSION}', 'theme' => 
   } catch (err) {
     // 起動後の初期化に失敗したまま放置すると、Playground サーバーが破棄されず残ってしまう
     await cli[Symbol.asyncDispose]().catch(() => {})
-    throw err
+    throw new VrtError('boot_failed', { cause: err })
   }
   return site
 }
 
-// 旧版の導入と新版への更新は同じ手順。overwrite_package で上書きし、実サイトの更新と同じく更新時の処理も走らせる
-export async function installPlugin(site, zipBuffer) {
+function startCli({ port }) {
+  return runCLI({
+    command: 'server',
+    php: PHP_VERSION,
+    wp: 'latest',
+    login: true,
+    port,
+    verbosity: 'quiet',
+    'define-bool': { WP_DEBUG: true, WP_DEBUG_DISPLAY: false },
+    define: { WP_DEBUG_LOG: DEBUG_LOG },
+  })
+}
+
+// 旧版の導入と新版への更新は同じ手順。overwrite_package で上書きし、実サイトの更新と同じく更新時の処理も走らせる。
+// phase（'old' / 'new'）は、どちらで落ちたかをエラーコードで見分けるため
+export async function installPlugin(site, zipBuffer, phase) {
   await site.cli.playground.writeFile('/tmp/vrt-plugin.zip', new Uint8Array(zipBuffer))
-  const out = await runPhp(site, `
+  let out
+  try {
+    out = await runPhp(site, `
 require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
 $u = new Plugin_Upgrader(new Automatic_Upgrader_Skin());
 $ok = $u->install('/tmp/vrt-plugin.zip', ['overwrite_package' => true]);
@@ -71,7 +86,12 @@ $act = $file ? activate_plugin($file) : new WP_Error('no_plugin_file', '');
 // unexpected_output は「有効化はできたが、その際に何か出力した」。実サイトでも有効なので成功として扱う
 $err = is_wp_error($act) && $act->get_error_code() !== 'unexpected_output' ? $act->get_error_code() : null;
 vrt_out(['ok' => $ok === true && is_plugin_active($file), 'file' => $file, 'error' => $err]);`)
-  if (!out.ok || out.error) throw new Error(`プラグインを有効化できない (${out.error ?? 'install_failed'})`)
+  } catch (err) {
+    // 導入・有効化の途中で PHP が致命的なエラーを出して止まった
+    if (err instanceof VrtError && err.code === 'php_no_marker') throw new VrtError(`${phase}_php_fatal`, { cause: err })
+    throw err
+  }
+  if (!out.ok || out.error) throw new VrtError(`${phase}_${activationErrorCode(out.error ?? 'install_failed')}`)
   return out.file
 }
 

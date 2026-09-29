@@ -22,7 +22,7 @@ export async function runVrt({ oldZip, newZip }, { browser, port, signal }) {
     // 起動を待つ間に時間切れになっていたら、ここで止める
     signal?.throwIfAborted()
     const coreTags = await listShortcodes(site)
-    await installPlugin(site, oldZip)
+    await installPlugin(site, oldZip, 'old')
     const { pages, hasSurface } = await createTestPages(site, browser, { coreTags })
     cap = await openCapturer(browser, site.cli.serverUrl)
     try {
@@ -42,7 +42,7 @@ export async function runVrt({ oldZip, newZip }, { browser, port, signal }) {
       const jsOffset = cap.jsErrors.length
       const beforeErrors = { php: await debugLogLines(site, 0, logOffset), js: cap.jsErrors.slice(0, jsOffset) }
 
-      await installPlugin(site, newZip)
+      await installPlugin(site, newZip, 'new')
 
       const results = []
       for (const p of pages) {

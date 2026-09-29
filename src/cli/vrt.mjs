@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url'
 import { log, reportFatal } from '../lib/log.mjs'
 import { readWorkJSON, readWorkFile, writeWorkJSON, writeWorkFile } from '../lib/work.mjs'
 import { VRT_JOB_TIMEOUT_MS } from '../score/policy.mjs'
+import { vrtErrorCode } from '../vrt/errors.mjs'
 
 class VrtTimeout extends Error {}
 
@@ -59,8 +60,10 @@ export async function runVrtStage({ workDir, runOne, portBase = 9400, timeoutMs 
           const port = portBase + ((i * 2 + attempt) % 100)
           result = await withTimeout((signal) => runner.run(job, port, signal), timeoutMs)
         } catch (err) {
-          // 1回だけ再試行する。2回とも失敗したら何も書かず、publish が試行回数を数える
+          // 1回だけ再試行する。2回とも失敗したら何も書かず、publish が試行回数を数える。
+          // 原因は決まった語のコードだけで残す（err.message にはプラグイン由来の文字列が入りうるため）
           if (err instanceof VrtTimeout) log('vrt_timeout', { key_hash, attempt })
+          else log(`vrt_error_${vrtErrorCode(err)}`, { key_hash, attempt })
         }
       }
       if (!result) {

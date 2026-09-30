@@ -63,6 +63,16 @@ describe('runPublish', () => {
     assert.equal(file.records[0].vrt.status, 'failed')
     assert.deepEqual(await store.getJSON('state/queue.json', null), [])
   })
+  it('vrt 段が確定させた failed（画像なし）は、1回目でも結果に書いてキューから外す', async () => {
+    const { store, workDir } = await setup({ withVrt: false })
+    await writeWorkJSON(workDir, `vrt/${H}/result.json`, vrtPlaceholder('failed', 'vrt_failed'))
+    await runPublish({ store, workDir, today: '2026-09-29', workKey: KEY })
+    const file = await store.getJSON('results/2026-09-29.json', null)
+    assert.equal(file.records[0].vrt.status, 'failed')
+    assert.equal(file.records[0].vrt.pages, null)
+    assert.deepEqual(await store.getJSON('state/queue.json', null), [])
+    assert.deepEqual(await store.getJSON('state/processed.json', null), [PAIR])
+  })
   it('今日追加して今日実行しなかった組は queued として出す', async () => {
     const { store, workDir } = await setup({ withVrt: false, additions: ['ffffffffffffffff'] })
     await writeWorkSealed(workDir, 'pending/ffffffffffffffff.sealed', { ...partial(), key: 'b@1→2', key_hash: 'ffffffffffffffff', slug: 'b' }, KEY)

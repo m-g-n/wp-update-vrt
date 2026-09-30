@@ -39,11 +39,17 @@ async function buildBlocksPage(mark) {
   if (parts.length === 0) return { made: 0, fromExample: 0, id: null }
   // 印は HTML のコメントとしてブロックの外に置く（ブロックが1つでもあれば wpautop は効かないので残る）
   const content = parts.map((html) => `<!--${mark}-->\n${html}`).join('\n')
-  const res = await window.wp.apiFetch({
-    path: '/wp/v2/pages',
-    method: 'POST',
-    data: { title: 'VRT blocks', content, status: 'publish' },
-  })
+  let res
+  try {
+    res = await window.wp.apiFetch({
+      path: '/wp/v2/pages',
+      method: 'POST',
+      data: { title: 'VRT blocks', content, status: 'publish' },
+    })
+  } catch {
+    // REST API での保存の失敗（プラグインが REST を壊しているなど）。ほかの失敗と分けて数える
+    return { saveFailed: true }
+  }
   return { made: parts.length, fromExample, id: res.id }
 }
 
@@ -96,20 +102,45 @@ async function openEditor(page, serverUrl) {
   throw new VrtError('editor_redirected')
 }
 
+// 編集画面を開いてテストページを作る。
+// 読み込みのあとで JS が別の画面へ転送するプラグインがあり、作っている途中で画面が替わると
+// page.evaluate が「実行中のコンテキストが消えた」で失敗する。そのときは編集画面から開き直す
+const NAVIGATED_RE = /Execution context was destroyed|because of a navigation/i
+
+async function buildOnEditor(page, serverUrl) {
+  for (let i = 0; i < EDITOR_TRIES; i++) {
+    await atStage('editor', () => openEditor(page, serverUrl))
+    let made
+    try {
+      made = await page.evaluate(`(${buildBlocksPage})(${JSON.stringify(PROBE_MARK)})`)
+    } catch (err) {
+      // 例外のメッセージは種類の判定にだけ使い、ログには出さない
+      if (!NAVIGATED_RE.test(String(err?.message))) throw new VrtError(err?.name === 'TimeoutError' ? 'browser_timeout_blocks' : 'unknown_blocks', { cause: err })
+      continue
+    }
+    if (made.saveFailed) throw new VrtError('blocks_save_failed')
+    return made
+  }
+  throw new VrtError('blocks_navigated')
+}
+
 // テストページは旧版で作り、新版でもそのまま表示する。
 // 実サイトでも既存の記事は古い保存形式のまま残り、新しい CSS とレンダリングだけが効くため（spec §4.6）
 export async function createTestPages(site, browser, { coreTags }) {
   const pages = [{ name: 'home', path: '/' }, { name: 'post', path: '/?p=1' }]
 
-  const tags = (await listShortcodes(site)).filter((t) => !coreTags.includes(t))
-  if (tags.length > 0) {
-    // 中身は PHP の文字列に埋め込まず、ファイル経由で渡す（$ などの展開を避ける）
-    await site.cli.playground.writeFile('/tmp/vrt-shortcodes.txt', tags.map((t) => `[${t}]`).join('\n\n'))
-    const id = await runPhp(site, `
+  const tags = await atStage('shortcodes', async () => {
+    const found = (await listShortcodes(site)).filter((t) => !coreTags.includes(t))
+    if (found.length > 0) {
+      // 中身は PHP の文字列に埋め込まず、ファイル経由で渡す（$ などの展開を避ける）
+      await site.cli.playground.writeFile('/tmp/vrt-shortcodes.txt', found.map((t) => `[${t}]`).join('\n\n'))
+      const id = await runPhp(site, `
 vrt_out(wp_insert_post(['post_type' => 'page', 'post_status' => 'publish', 'post_title' => 'VRT shortcodes',
   'post_content' => file_get_contents('/tmp/vrt-shortcodes.txt')]));`)
-    pages.push({ name: 'shortcodes', path: `/?page_id=${id}` })
-  }
+      pages.push({ name: 'shortcodes', path: `/?page_id=${id}` })
+    }
+    return found
+  })
 
   const context = await browser.newContext()
   await blockExternal(context)
@@ -118,8 +149,7 @@ vrt_out(wp_insert_post(['post_type' => 'page', 'post_status' => 'publish', 'post
   let visible = 0
   try {
     // 失敗したとき、どの段で止まったかをログに残す（src/vrt/errors.mjs）
-    await atStage('editor', () => openEditor(page, site.cli.serverUrl))
-    made = await atStage('blocks', () => page.evaluate(`(${buildBlocksPage})(${JSON.stringify(PROBE_MARK)})`))
+    made = await buildOnEditor(page, site.cli.serverUrl)
     if (made.made > 0) {
       // 撮るのと同じ幅ごとに見る（狭い幅でだけ出るブロックもある）
       const seen = []

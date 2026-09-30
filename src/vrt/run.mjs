@@ -2,6 +2,7 @@ import { bootSite, installPlugin, listShortcodes, debugLogLength, debugLogLines 
 import { createTestPages } from './pages.mjs'
 import { openCapturer, newErrors, WIDTHS } from './capture.mjs'
 import { comparePngs, judge } from './compare.mjs'
+import { atStage } from './errors.mjs'
 
 const round6 = (x) => Math.round(x * 1e6) / 1e6
 
@@ -21,10 +22,11 @@ export async function runVrt({ oldZip, newZip }, { browser, port, signal }) {
   try {
     // 起動を待つ間に時間切れになっていたら、ここで止める
     signal?.throwIfAborted()
-    const coreTags = await listShortcodes(site)
-    await installPlugin(site, oldZip, 'old')
+    // 失敗したとき、どの段で止まったかをログに残す（src/vrt/errors.mjs）
+    const coreTags = await atStage('shortcodes', () => listShortcodes(site))
+    await atStage('install_old', () => installPlugin(site, oldZip, 'old'))
     const { pages, hasSurface, probe } = await createTestPages(site, browser, { coreTags })
-    cap = await openCapturer(browser, site.cli.serverUrl)
+    cap = await atStage('capturer', () => openCapturer(browser, site.cli.serverUrl))
     try {
       signal?.throwIfAborted()
       const before = new Map()
@@ -33,35 +35,36 @@ export async function runVrt({ oldZip, newZip }, { browser, port, signal }) {
         for (const w of WIDTHS) {
           const first = await cap.shot(p.path, w)
           const second = await cap.shot(p.path, w)
-          noise.push(comparePngs(first, second).ratio)
+          noise.push(await atStage('compare', async () => comparePngs(first, second).ratio))
           before.set(`${p.name}-${w}`, first)
         }
       }
       // 旧版の間に出ていたエラー（起動・旧版の導入・撮影）。新版で増えたものだけを出すための基準
-      const logOffset = await debugLogLength(site)
+      const logOffset = await atStage('log', () => debugLogLength(site))
       const jsOffset = cap.jsErrors.length
-      const beforeErrors = { php: await debugLogLines(site, 0, logOffset), js: cap.jsErrors.slice(0, jsOffset) }
+      const beforeErrors = { php: await atStage('log', () => debugLogLines(site, 0, logOffset)), js: cap.jsErrors.slice(0, jsOffset) }
 
-      await installPlugin(site, newZip, 'new')
+      await atStage('install_new', () => installPlugin(site, newZip, 'new'))
 
       const results = []
       for (const p of pages) {
         for (const w of WIDTHS) {
           const oldPng = before.get(`${p.name}-${w}`)
           const newPng = await cap.shot(p.path, w)
-          const { ratio, diffPng } = comparePngs(oldPng, newPng)
+          const { ratio, diffPng } = await atStage('compare', async () => comparePngs(oldPng, newPng))
           results.push({ page: p.name, width: w, diff_ratio: round6(ratio), images: { old: oldPng, new: newPng, diff: diffPng } })
         }
       }
       const noiseFloor = round6(Math.max(0, ...noise))
       const verdict = judge({ noiseFloor, pages: results, hasSurface })
+      const phpAfter = await atStage('log', () => debugLogLines(site, logOffset))
       return {
         status: verdict.status,
         reason: null,
         env: site.env,
         noise_floor: noiseFloor,
         pages: results,
-        errors_new: newErrors(beforeErrors, { php: await debugLogLines(site, logOffset), js: cap.jsErrors.slice(jsOffset) }),
+        errors_new: newErrors(beforeErrors, { php: phpAfter, js: cap.jsErrors.slice(jsOffset) }),
         vrt_changed: verdict.vrt_changed,
         // 結果には書かず、vrt 段のログにだけ数を出す（src/cli/vrt.mjs）
         probe,

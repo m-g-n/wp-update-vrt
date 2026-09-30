@@ -79,6 +79,34 @@ add_shortcode('vrt_redirect_box', fn() => '<div style="width:200px;height:100px;
 `,
 })
 
+// 別のプラグインが要る（Requires Plugins）架空のプラグイン。依存先は入れないので有効化できない
+const needsPlugin = (version) => makeZip('vrt-needs', {
+  'vrt-needs.php': `<?php
+/**
+ * Plugin Name: VRT Needs
+ * Version: ${version}
+ * Requires Plugins: woocommerce
+ */
+`,
+})
+
+// 編集画面を開いたあと、初回だけ JS で設定画面へ移る架空のプラグイン
+const jsRedirectPlugin = (version) => makeZip('vrt-jsredirect', {
+  'vrt-jsredirect.php': `<?php
+/**
+ * Plugin Name: VRT JS Redirect
+ * Version: ${version}
+ */
+register_activation_hook(__FILE__, function () { update_option('vrt_js_redirect_pending', 1); });
+add_action('admin_footer-post-new.php', function () {
+  if (!get_option('vrt_js_redirect_pending')) return;
+  delete_option('vrt_js_redirect_pending');
+  echo '<script>setTimeout(function () { location.href = ' . wp_json_encode(admin_url('options-general.php')) . '; }, 0);</script>';
+});
+add_shortcode('vrt_js_box', fn() => '<div style="width:200px;height:100px;background:red"></div>');
+`,
+})
+
 describe('runVrt（Playground＋Chromium）', () => {
   let browser
   before(async () => {
@@ -123,6 +151,18 @@ describe('runVrt（Playground＋Chromium）', () => {
 
   it('初回だけ初期設定の画面へ転送されても、編集画面を開き直して続ける', async () => {
     const r = await runVrt({ oldZip: redirectPlugin('1.0.0'), newZip: redirectPlugin('1.0.1') }, { browser, port: 9485 })
+    assert.equal(r.status, 'done')
+  })
+
+  it('別のプラグインが要るプラグインは、確定させる失敗のコードになる', async () => {
+    await assert.rejects(
+      runVrt({ oldZip: needsPlugin('1.0.0'), newZip: needsPlugin('1.0.1') }, { browser, port: 9487 }),
+      (e) => vrtErrorCode(e) === 'old_activate_plugin_missing_dependencies',
+    )
+  })
+
+  it('編集画面を開いたあとに JS で別の画面へ移っても、開き直して続ける', async () => {
+    const r = await runVrt({ oldZip: jsRedirectPlugin('1.0.0'), newZip: jsRedirectPlugin('1.0.1') }, { browser, port: 9488 })
     assert.equal(r.status, 'done')
   })
 

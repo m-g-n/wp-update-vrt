@@ -4,9 +4,9 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { VrtError, vrtErrorCode, activationErrorCode, atStage } from '../src/vrt/errors.mjs'
+import { VrtError, vrtErrorCode, activationErrorCode, atStage, isTerminalError, isRetryableInRun } from '../src/vrt/errors.mjs'
 import { runVrtStage } from '../src/cli/vrt.mjs'
-import { writeWorkJSON, writeWorkFile } from '../src/lib/work.mjs'
+import { writeWorkJSON, writeWorkFile, readWorkJSON, workExists } from '../src/lib/work.mjs'
 import { setLogSink } from '../src/lib/log.mjs'
 
 describe('vrtErrorCode', () => {
@@ -43,6 +43,24 @@ describe('atStage', () => {
   })
 })
 
+describe('isTerminalError / isRetryableInRun', () => {
+  it('何度試しても同じ有効化の失敗は、旧版でも新版でも確定させる', () => {
+    assert.equal(isTerminalError('old_activate_plugin_missing_dependencies'), true)
+    assert.equal(isTerminalError('new_activate_plugin_php_incompatible'), true)
+  })
+  it('原因の分からない有効化の失敗や、ほかの段の失敗は確定させない（翌日にまた試す）', () => {
+    assert.equal(isTerminalError('old_activate_other'), false)
+    assert.equal(isTerminalError('old_php_fatal'), false)
+    assert.equal(isTerminalError('browser_timeout_editor'), false)
+    assert.equal(isTerminalError(undefined), false)
+  })
+  it('その日のうちに試し直すのは起動の失敗だけ', () => {
+    assert.equal(isRetryableInRun('boot_failed'), true)
+    assert.equal(isRetryableInRun('browser_timeout_shot'), false)
+    assert.equal(isRetryableInRun('unknown'), false)
+  })
+})
+
 describe('activationErrorCode', () => {
   it('WordPress の定型コードはそのまま使う', () => {
     assert.equal(activationErrorCode('plugin_php_incompatible'), 'activate_plugin_php_incompatible')
@@ -70,13 +88,29 @@ describe('runVrtStage のエラーの記録', () => {
     return lines.map((l) => JSON.parse(l))
   }
 
-  it('試行ごとに、キーのハッシュと定型のエラーコードを出す', async () => {
+  it('何度試しても同じ失敗は、1回で failed として結果に書く（翌日以降も試し直さない）', async () => {
     const workDir = await setup()
-    const runOne = async () => { throw new VrtError('new_activate_plugin_php_incompatible') }
+    let n = 0
+    const runOne = async () => { n++; throw new VrtError('old_activate_plugin_missing_dependencies') }
     const events = await capture(() => runVrtStage({ workDir, runOne }))
-    const errs = events.filter((e) => e.event === 'vrt_error_new_activate_plugin_php_incompatible')
-    assert.equal(errs.length, 2)
-    assert.deepEqual(errs.map((e) => [e.key_hash, e.attempt]), [[H, 0], [H, 1]])
+    assert.equal(n, 1)
+    const errs = events.filter((e) => e.event === 'vrt_error_old_activate_plugin_missing_dependencies')
+    assert.deepEqual(errs.map((e) => [e.key_hash, e.attempt]), [[H, 0]])
+    const r = await readWorkJSON(workDir, `vrt/${H}/result.json`)
+    assert.equal(r.status, 'failed')
+    assert.equal(r.reason, 'vrt_failed')
+    assert.equal(r.pages, null)
+    assert.equal(events.find((e) => e.event === 'vrt_done').failed, 1)
+  })
+
+  it('起動以外の失敗は、その日のうちには試し直さず何も書かない（publish が試行回数を数える）', async () => {
+    const workDir = await setup()
+    let n = 0
+    const runOne = async () => { n++; throw new VrtError('browser_timeout_editor') }
+    const events = await capture(() => runVrtStage({ workDir, runOne }))
+    assert.equal(n, 1)
+    assert.deepEqual(events.filter((e) => e.event === 'vrt_error_browser_timeout_editor').map((e) => e.attempt), [0])
+    assert.equal(await workExists(workDir, `vrt/${H}/result.json`), false)
   })
 
   it('原因の分からないエラーは unknown とし、メッセージは出さない', async () => {

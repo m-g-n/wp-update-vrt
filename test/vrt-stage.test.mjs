@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { runVrtStage, vrtAllFailed } from '../src/cli/vrt.mjs'
+import { VrtError } from '../src/vrt/errors.mjs'
 import { writeWorkJSON, writeWorkFile, readWorkJSON, workExists } from '../src/lib/work.mjs'
 import { setLogSink } from '../src/lib/log.mjs'
 
@@ -31,24 +32,24 @@ describe('runVrtStage', () => {
     assert.equal(r.pages[0].images.old, `img/${H}/home-1280-old.png`)
     assert.ok(await workExists(workDir, `vrt/${H}/home-1280-diff.png`))
   })
-  it('1回失敗しても再試行で成功すれば書く', async () => {
+  it('起動に1回失敗しても、再試行で成功すれば書く', async () => {
     const workDir = await setup()
     let n = 0
     const runOne = async () => {
-      if (++n === 1) throw new Error('boot failed')
+      if (++n === 1) throw new VrtError('boot_failed')
       return { status: 'no_surface', reason: null, env: null, noise_floor: 0, pages: [], errors_new: { php: [], js: [] }, vrt_changed: false }
     }
     await runVrtStage({ workDir, runOne })
     assert.equal(n, 2)
     assert.ok(await workExists(workDir, `vrt/${H}/result.json`))
   })
-  it('2回とも失敗したら何も書かない', async () => {
+  it('2回とも起動に失敗したら何も書かない', async () => {
     const workDir = await setup()
-    const counts = await runVrtStage({ workDir, runOne: async () => { throw new Error('x') } })
+    const counts = await runVrtStage({ workDir, runOne: async () => { throw new VrtError('boot_failed') } })
     assert.equal(counts.error, 1)
     assert.equal(await workExists(workDir, `vrt/${H}/result.json`), false)
   })
-  it('返ってこない実行は時間切れで失敗として数え、止める合図を渡す（1件で1日を潰さない）', async () => {
+  it('返ってこない実行は時間切れで失敗として数え、止める合図を渡す。試し直さない（1件で1日を潰さない）', async () => {
     const workDir = await setup()
     const signals = []
     const runOne = (job, port, signal) => {
@@ -57,7 +58,7 @@ describe('runVrtStage', () => {
     }
     const counts = await runVrtStage({ workDir, runOne, timeoutMs: 20 })
     assert.equal(counts.error, 1)
-    assert.equal(signals.length, 2)
+    assert.equal(signals.length, 1)
     assert.ok(signals.every((s) => s.aborted))
     assert.equal(await workExists(workDir, `vrt/${H}/result.json`), false)
   })

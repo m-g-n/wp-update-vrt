@@ -21,12 +21,16 @@ add_shortcode('vrt_box', fn() => '<div class="vrt-box" style="width:200px;height
 // ブロックだけを持つ架空のプラグイン。どちらのブロックも、属性が空なら何も出力しない（コアの表ブロックと同じ作り）。
 // example を持つのは card / narrow（375px でだけ見える）/ broken（example の値で save() が例外を投げる）。
 // 色は表側の CSS で変える（保存済みの HTML は旧版のまま残るため）
-const blockPlugin = (version, color, { withExample = true } = {}) => makeZip('vrt-blocks', {
+const blockPlugin = (version, color, { withExample = true, restBlocked = false } = {}) => makeZip('vrt-blocks', {
   'vrt-blocks.php': `<?php
 /**
  * Plugin Name: VRT Blocks
  * Version: ${version}
  */
+${restBlocked ? `// REST での書き込みを止めるセキュリティ系のプラグインのまね
+add_filter('rest_pre_dispatch', function ($result, $server, $request) {
+  return $request->get_method() === 'GET' ? $result : new WP_Error('vrt_rest_blocked', 'blocked', ['status' => 403]);
+}, 10, 3);` : ''}
 add_action('enqueue_block_editor_assets', function () {
   wp_enqueue_script('vrt-blocks', plugins_url('editor.js', __FILE__), ['wp-blocks', 'wp-element'], '${version}');
 });
@@ -107,6 +111,18 @@ add_shortcode('vrt_js_box', fn() => '<div style="width:200px;height:100px;backgr
 `,
 })
 
+// 処理の最後（shutdown）に何か出力する架空のプラグイン（キャッシュ系のプラグインが HTML のコメントを足すのと同じ）
+const trailingPlugin = (version) => makeZip('vrt-trailing', {
+  'vrt-trailing.php': `<?php
+/**
+ * Plugin Name: VRT Trailing
+ * Version: ${version}
+ */
+add_action('shutdown', function () { echo '<!-- vrt-trailing -->'; });
+add_shortcode('vrt_trailing_box', fn() => '<div style="width:200px;height:100px;background:red"></div>');
+`,
+})
+
 describe('runVrt（Playground＋Chromium）', () => {
   let browser
   before(async () => {
@@ -151,6 +167,19 @@ describe('runVrt（Playground＋Chromium）', () => {
 
   it('初回だけ初期設定の画面へ転送されても、編集画面を開き直して続ける', async () => {
     const r = await runVrt({ oldZip: redirectPlugin('1.0.0'), newZip: redirectPlugin('1.0.1') }, { browser, port: 9485 })
+    assert.equal(r.status, 'done')
+  })
+
+  it('REST での書き込みを止めるプラグインでも、テストページを作って比べられる', async () => {
+    const opts = { restBlocked: true }
+    const r = await runVrt({ oldZip: blockPlugin('1.0.0', 'red', opts), newZip: blockPlugin('1.1.0', 'blue', opts) }, { browser, port: 9489 })
+    assert.equal(r.probe.made, 4)
+    assert.equal(r.status, 'done')
+    assert.equal(r.vrt_changed, true)
+  })
+
+  it('処理の最後に何か出力するプラグインでも、導入の結果を読める', async () => {
+    const r = await runVrt({ oldZip: trailingPlugin('1.0.0'), newZip: trailingPlugin('1.0.1') }, { browser, port: 9490 })
     assert.equal(r.status, 'done')
   })
 

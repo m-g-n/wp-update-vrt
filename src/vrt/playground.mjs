@@ -6,6 +6,8 @@ export const PHP_VERSION = '8.2'
 export const THEME = 'twentytwentyfive'
 const DEBUG_LOG = '/tmp/wp-debug.log'
 const MARK = '@@VRT@@'
+const MARK_END = '@@VRT-END@@'
+const MARKED_RE = new RegExp(`${MARK}([\\s\\S]*?)${MARK_END}`, 'g')
 
 // VRT 中は外部への HTTP を止め（再現性と安全のため）、管理バーを消す（訪問者の見た目にそろえる）
 const MU_PLUGIN = `<?php
@@ -17,21 +19,31 @@ add_filter('pre_http_request', function ($pre, $args, $url) {
 add_filter('show_admin_bar', '__return_false');
 `
 
-// プラグインが有効化時などに何かを出力しても取り違えないよう、印の後ろだけを読む
+// プラグインが有効化時や shutdown で何かを出力しても取り違えないよう、印で挟んだ間だけを読む
 export function parseMarked(text) {
-  const i = text.lastIndexOf(MARK)
+  const found = [...text.matchAll(MARKED_RE)]
   // 印が出ないのは、ほぼ PHP の致命的なエラーで処理が途中で止まったとき
-  if (i < 0) throw new VrtError('php_no_marker')
-  return JSON.parse(text.slice(i + MARK.length))
+  if (found.length === 0) throw new VrtError(text.includes(MARK) ? 'php_bad_output' : 'php_no_marker')
+  try {
+    return JSON.parse(found.at(-1)[1])
+  } catch (err) {
+    throw new VrtError('php_bad_output', { cause: err })
+  }
 }
 
 export async function runPhp(site, body) {
   const code = `<?php
 require '/wordpress/wp-load.php';
 require_once ABSPATH . 'wp-admin/includes/admin.php';
-function vrt_out($v) { echo "\\n${MARK}" . json_encode($v); }
+function vrt_out($v) { echo "\\n${MARK}" . json_encode($v) . "${MARK_END}"; }
 ${body}`
-  const res = await site.cli.playground.run({ code })
+  let res
+  try {
+    res = await site.cli.playground.run({ code })
+  } catch (err) {
+    // PHP が致命的なエラーで止まると、Playground は出力を返さずに実行そのものを失敗にすることがある
+    throw new VrtError('php_run_failed', { cause: err })
+  }
   return parseMarked(res.text)
 }
 
@@ -87,8 +99,9 @@ $act = $file ? activate_plugin($file) : new WP_Error('no_plugin_file', '');
 $err = is_wp_error($act) && $act->get_error_code() !== 'unexpected_output' ? $act->get_error_code() : null;
 vrt_out(['ok' => $ok === true && is_plugin_active($file), 'file' => $file, 'error' => $err]);`)
   } catch (err) {
-    // 導入・有効化の途中で PHP が致命的なエラーを出して止まった
-    if (err instanceof VrtError && err.code === 'php_no_marker') throw new VrtError(`${phase}_php_fatal`, { cause: err })
+    // 導入・有効化の途中で PHP が止まった（印が出ない・実行そのものが失敗・出力が読めない）
+    const codes = { php_no_marker: 'php_fatal', php_run_failed: 'php_run_failed', php_bad_output: 'php_bad_output' }
+    if (err instanceof VrtError && codes[err.code]) throw new VrtError(`${phase}_${codes[err.code]}`, { cause: err })
     throw err
   }
   if (!out.ok || out.error) throw new VrtError(`${phase}_${activationErrorCode(out.error ?? 'install_failed')}`)

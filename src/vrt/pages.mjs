@@ -8,8 +8,9 @@ const PROBE_MARK = 'vrt-block-probe'
 // 編集画面の中で動かす（page.evaluate に文字列で渡すので、外の変数を参照しない）。
 // example（編集画面のプレビュー用の見本）があればそれで作る。表のブロックのように、
 // 既定の attributes だと何も出力しないブロックが多いため。example は block.json ではなく
-// JS の registerBlockType() に書かれていることもあるが、getBlockTypes() ならどちらも読める
-async function buildBlocksPage(mark) {
+// JS の registerBlockType() に書かれていることもあるが、getBlockTypes() ならどちらも読める。
+// ここでは中身を作るだけで、保存は PHP で行う（savePage）
+function buildBlocksPage(mark) {
   const api = window.wp.blocks
   // 作る・serialize するのを1つずつ試す（1つの失敗でページ全体を落とさない）。
   // いまの WordPress は save() の例外を serialize の中で握るが、それに頼らない
@@ -36,21 +37,27 @@ async function buildBlocksPage(mark) {
     html ??= tryHtml(() => api.createBlock(type.name))
     if (html !== null) parts.push(html)
   }
-  if (parts.length === 0) return { made: 0, fromExample: 0, id: null }
+  if (parts.length === 0) return { made: 0, fromExample: 0, content: null }
   // 印は HTML のコメントとしてブロックの外に置く（ブロックが1つでもあれば wpautop は効かないので残る）
   const content = parts.map((html) => `<!--${mark}-->\n${html}`).join('\n')
-  let res
-  try {
-    res = await window.wp.apiFetch({
-      path: '/wp/v2/pages',
-      method: 'POST',
-      data: { title: 'VRT blocks', content, status: 'publish' },
-    })
-  } catch {
-    // REST API での保存の失敗（プラグインが REST を壊しているなど）。ほかの失敗と分けて数える
-    return { saveFailed: true }
-  }
-  return { made: parts.length, fromExample, id: res.id }
+  return { made: parts.length, fromExample, content }
+}
+
+// 固定ページとして公開し、ID を返す。REST API ではなく PHP で保存する
+// （REST を制限するセキュリティ系のプラグインなどで、保存できない組があったため。2026-10-01）。
+// 中身は PHP の文字列に埋め込まず、ファイル経由で渡す（$ などの展開を避ける）。
+// 管理者として保存して kses で中身が削られないようにし、wp_insert_post が外すバックスラッシュを
+// wp_slash で守る（ブロックの属性の JSON には \u003c のようなエスケープが入る）
+// kind（blocks / shortcodes）は、保存できなかったときのエラーコードに使う
+async function savePage(site, kind, title, content) {
+  await site.cli.playground.writeFile('/tmp/vrt-page.html', content)
+  const id = await runPhp(site, `
+wp_set_current_user(1);
+$id = wp_insert_post(['post_type' => 'page', 'post_status' => 'publish', 'post_title' => ${JSON.stringify(title)},
+  'post_content' => wp_slash(file_get_contents('/tmp/vrt-page.html'))], true);
+vrt_out(is_wp_error($id) ? 0 : $id);`)
+  if (!id) throw new VrtError(`${kind}_save_failed`)
+  return id
 }
 
 // 表側の blocks ページの中で動かす。印ごとに、次の印までに大きさのある要素か文字があるかを見る。
@@ -118,7 +125,6 @@ async function buildOnEditor(page, serverUrl) {
       if (!NAVIGATED_RE.test(String(err?.message))) throw new VrtError(err?.name === 'TimeoutError' ? 'browser_timeout_blocks' : 'unknown_blocks', { cause: err })
       continue
     }
-    if (made.saveFailed) throw new VrtError('blocks_save_failed')
     return made
   }
   throw new VrtError('blocks_navigated')
@@ -132,11 +138,7 @@ export async function createTestPages(site, browser, { coreTags }) {
   const tags = await atStage('shortcodes', async () => {
     const found = (await listShortcodes(site)).filter((t) => !coreTags.includes(t))
     if (found.length > 0) {
-      // 中身は PHP の文字列に埋め込まず、ファイル経由で渡す（$ などの展開を避ける）
-      await site.cli.playground.writeFile('/tmp/vrt-shortcodes.txt', found.map((t) => `[${t}]`).join('\n\n'))
-      const id = await runPhp(site, `
-vrt_out(wp_insert_post(['post_type' => 'page', 'post_status' => 'publish', 'post_title' => 'VRT shortcodes',
-  'post_content' => file_get_contents('/tmp/vrt-shortcodes.txt')]));`)
+      const id = await savePage(site, 'shortcodes', 'VRT shortcodes', found.map((t) => `[${t}]`).join('\n\n'))
       pages.push({ name: 'shortcodes', path: `/?page_id=${id}` })
     }
     return found
@@ -145,18 +147,20 @@ vrt_out(wp_insert_post(['post_type' => 'page', 'post_status' => 'publish', 'post
   const context = await browser.newContext()
   await blockExternal(context)
   const page = await context.newPage()
-  let made = { made: 0, fromExample: 0, id: null }
+  let made = { made: 0, fromExample: 0, content: null }
+  let blocksId = null
   let visible = 0
   try {
     // 失敗したとき、どの段で止まったかをログに残す（src/vrt/errors.mjs）
     made = await buildOnEditor(page, site.cli.serverUrl)
+    if (made.made > 0) blocksId = await atStage('blocks', () => savePage(site, 'blocks', 'VRT blocks', made.content))
     if (made.made > 0) {
       // 撮るのと同じ幅ごとに見る（狭い幅でだけ出るブロックもある）
       const seen = []
       await atStage('probe', async () => {
         for (const width of WIDTHS) {
           await page.setViewportSize({ width, height: 800 })
-          await page.goto(`${site.cli.serverUrl}/?page_id=${made.id}`, { waitUntil: 'load', timeout: 60_000 })
+          await page.goto(`${site.cli.serverUrl}/?page_id=${blocksId}`, { waitUntil: 'load', timeout: 60_000 })
           const flags = await page.evaluate(`(${visibleBlocks})(${JSON.stringify(PROBE_MARK)})`)
           flags.forEach((v, i) => { seen[i] ||= v })
         }
@@ -166,7 +170,7 @@ vrt_out(wp_insert_post(['post_type' => 'page', 'post_status' => 'publish', 'post
   } finally {
     await context.close()
   }
-  if (made.made > 0) pages.push({ name: 'blocks', path: `/?page_id=${made.id}` })
+  if (made.made > 0) pages.push({ name: 'blocks', path: `/?page_id=${blocksId}` })
 
   // 作れても表側に何も出なかったブロックは、表示部分に数えない（何も写っていない画像で「変化なし」と言わないため）
   return {

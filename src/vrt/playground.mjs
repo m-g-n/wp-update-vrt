@@ -41,8 +41,12 @@ ${body}`
   try {
     res = await site.cli.playground.run({ code })
   } catch (err) {
-    // PHP が致命的なエラーで止まると、Playground は出力を返さずに実行そのものを失敗にすることがある
-    throw new VrtError('php_run_failed', { cause: err })
+    // Playground の run() は、PHP の終了コードが 0 でなければ例外にする（致命的なエラーは 255）。
+    // 結果を出したあとで止まった（プラグインが shutdown で致命的なエラーを出したなど）なら、その結果を使う
+    const text = err?.response?.text
+    if (typeof text === 'string' && text.includes(MARK_END)) return parseMarked(text)
+    const exitCode = err?.response?.exitCode
+    throw new VrtError('php_run_failed', { cause: err, fields: { exit_code: Number.isInteger(exitCode) ? exitCode : null } })
   }
   return parseMarked(res.text)
 }
@@ -99,8 +103,9 @@ $act = $file ? activate_plugin($file) : new WP_Error('no_plugin_file', '');
 $err = is_wp_error($act) && $act->get_error_code() !== 'unexpected_output' ? $act->get_error_code() : null;
 vrt_out(['ok' => $ok === true && is_plugin_active($file), 'file' => $file, 'error' => $err]);`)
   } catch (err) {
-    // 導入・有効化の途中で PHP が止まった（印が出ない・実行そのものが失敗・出力が読めない）
-    const codes = { php_no_marker: 'php_fatal', php_run_failed: 'php_run_failed', php_bad_output: 'php_bad_output' }
+    // 導入・有効化の途中で PHP が止まった。
+    // 印が出ずに正常に終わった（exit_code 0）なら、プラグインが exit / die した。致命的なエラーは php_run_failed になる
+    const codes = { php_no_marker: 'php_exited', php_run_failed: 'php_run_failed', php_bad_output: 'php_bad_output' }
     if (err instanceof VrtError && codes[err.code]) throw new VrtError(`${phase}_${codes[err.code]}`, { cause: err })
     throw err
   }

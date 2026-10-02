@@ -38,6 +38,15 @@ describe('atStage', () => {
       return true
     })
   })
+  it('段の分からない PHP の失敗には、どの段で起きたかを前に付ける（数の項目は引き継ぐ）', async () => {
+    const inner = new VrtError('php_run_failed', { fields: { exit_code: 255 } })
+    await assert.rejects(atStage('shortcodes', async () => { throw inner }), (e) => {
+      assert.equal(vrtErrorCode(e), 'shortcodes_php_run_failed')
+      assert.deepEqual(e.fields, { exit_code: 255 })
+      return true
+    })
+    await assert.rejects(atStage('blocks', async () => { throw new VrtError('php_no_marker') }), (e) => vrtErrorCode(e) === 'blocks_php_no_marker')
+  })
   it('成功すればその値を返す', async () => {
     assert.equal(await atStage('shot', async () => 42), 42)
   })
@@ -50,7 +59,7 @@ describe('isTerminalError / isRetryableInRun', () => {
   })
   it('原因の分からない有効化の失敗や、ほかの段の失敗は確定させない（翌日にまた試す）', () => {
     assert.equal(isTerminalError('old_activate_other'), false)
-    assert.equal(isTerminalError('old_php_fatal'), false)
+    assert.equal(isTerminalError('old_php_exited'), false)
     assert.equal(isTerminalError('browser_timeout_editor'), false)
     assert.equal(isTerminalError(undefined), false)
   })
@@ -111,6 +120,13 @@ describe('runVrtStage のエラーの記録', () => {
     assert.equal(n, 1)
     assert.deepEqual(events.filter((e) => e.event === 'vrt_error_browser_timeout_editor').map((e) => e.attempt), [0])
     assert.equal(await workExists(workDir, `vrt/${H}/result.json`), false)
+  })
+
+  it('エラーに付いた数の項目（終了コードなど）もログに出す', async () => {
+    const workDir = await setup()
+    const runOne = async () => { throw new VrtError('old_php_run_failed', { fields: { exit_code: 255 } }) }
+    const events = await capture(() => runVrtStage({ workDir, runOne }))
+    assert.deepEqual(events.find((e) => e.event === 'vrt_error_old_php_run_failed'), { event: 'vrt_error_old_php_run_failed', key_hash: H, attempt: 0, exit_code: 255 })
   })
 
   it('原因の分からないエラーは unknown とし、メッセージは出さない', async () => {

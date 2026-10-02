@@ -67,7 +67,8 @@ export async function runVrtStage({ workDir, runOne, portBase = 9400, timeoutMs 
             break
           }
           const code = vrtErrorCode(err)
-          log(`vrt_error_${code}`, { key_hash, attempt })
+          // fields は数だけ（log が数以外を伏せる）
+          log(`vrt_error_${code}`, { key_hash, attempt, ...err?.fields })
           // 何度試しても同じ失敗は、ここで failed として確定させる（publish が結果として書く）
           if (isTerminalError(code)) result = vrtPlaceholder('failed', 'vrt_failed')
           // それ以外で、その日のうちに試し直すのは起動の失敗だけ。

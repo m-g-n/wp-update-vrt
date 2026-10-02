@@ -123,7 +123,9 @@ add_shortcode('vrt_trailing_box', fn() => '<div style="width:200px;height:100px;
 `,
 })
 
-// 表側で定期的に通信し続ける架空のプラグイン（チャットやアクセス計測のポーリングのまね）
+// 表側で定期的に通信し続ける架空のプラグイン（チャットやアクセス計測のポーリングのまね）。
+// 通信先は静的なファイルにする（PHP に向けると、CI の遅い Playground では処理が追いつかず、ページ本体の読み込みまで詰まる）。
+// 間隔は networkidle の判定（500ms 通信が無い）より短くし、ずっと止まらないようにする
 const pollingPlugin = (version) => makeZip('vrt-polling', {
   'vrt-polling.php': `<?php
 /**
@@ -131,10 +133,11 @@ const pollingPlugin = (version) => makeZip('vrt-polling', {
  * Version: ${version}
  */
 add_action('wp_footer', function () {
-  echo '<script>setInterval(function () { fetch("/?vrt_ping=" + Date.now()); }, 300);</script>';
+  echo '<script>setInterval(function () { fetch(' . wp_json_encode(plugins_url('ping.txt', __FILE__)) . ' + "?t=" + Date.now()); }, 300);</script>';
 });
 add_shortcode('vrt_polling_box', fn() => '<div style="width:200px;height:100px;background:red"></div>');
 `,
+  'ping.txt': 'pong',
 })
 
 describe('runVrt（Playground＋Chromium）', () => {

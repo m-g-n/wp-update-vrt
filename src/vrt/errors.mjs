@@ -1,12 +1,17 @@
 // VRT の1件が失敗した理由を、公開ログに出してよい形（決まった語だけ）で表す。
 // code はログのイベント名になるので、英小文字・数字・_ だけにする。プラグイン由来の文字列は入れない
+// fields は数だけ（PHP の終了コードなど）。ログに一緒に出す
 export class VrtError extends Error {
-  constructor(code, options) {
+  constructor(code, { fields, ...options } = {}) {
     super(code, options)
     this.name = 'VrtError'
     this.code = code
+    this.fields = fields ?? options.cause?.fields
   }
 }
+
+// どの段で起きたかが名前に入っていない PHP の失敗。atStage が段の名前を前に付ける
+const GENERIC_PHP_CODES = new Set(['php_no_marker', 'php_run_failed', 'php_bad_output'])
 
 // WordPress の Plugin_Upgrader / activate_plugin が返す定型のエラーコード。
 // プラグインが自前で返したコードはここに無いので other にまとめる
@@ -33,7 +38,10 @@ export async function atStage(stage, fn) {
   try {
     return await fn()
   } catch (err) {
-    if (err instanceof VrtError) throw err
+    if (err instanceof VrtError) {
+      if (GENERIC_PHP_CODES.has(err.code)) throw new VrtError(`${stage}_${err.code}`, { cause: err })
+      throw err
+    }
     if (err?.name === 'TimeoutError') throw new VrtError(`browser_timeout_${stage}`, { cause: err })
     throw new VrtError(`unknown_${stage}`, { cause: err })
   }

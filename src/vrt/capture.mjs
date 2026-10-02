@@ -2,6 +2,9 @@ import { atStage } from './errors.mjs'
 
 export const WIDTHS = [1280, 375]
 const MAX_HEIGHT = 10_000
+// 読み込みのあと、通信が止まるのをこの時間だけ待つ。定期的に通信し続けるページ（ポーリングなど）は
+// いつまでも止まらないので、待ちきったらそのまま撮る（以前は止まるまで60秒待ち、時間切れになっていた）
+const SETTLE_MS = 5_000
 const FREEZE_CSS = '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}'
 
 const MAX_LINE = 300
@@ -55,7 +58,8 @@ export async function openCapturer(browser, serverUrl) {
     jsErrors,
     shot: (path, width) => atStage('shot', async () => {
       await page.setViewportSize({ width, height: 800 })
-      await page.goto(serverUrl + path, { waitUntil: 'networkidle', timeout: 60_000 })
+      await page.goto(serverUrl + path, { waitUntil: 'load', timeout: 60_000 })
+      await page.waitForLoadState('networkidle', { timeout: SETTLE_MS }).catch(() => {})
       await page.addStyleTag({ content: FREEZE_CSS })
       await page.evaluate(() => document.fonts.ready)
       const height = await page.evaluate(() => document.documentElement.scrollHeight)

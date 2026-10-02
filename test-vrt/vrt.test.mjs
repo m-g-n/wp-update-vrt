@@ -123,6 +123,23 @@ add_shortcode('vrt_trailing_box', fn() => '<div style="width:200px;height:100px;
 `,
 })
 
+// 表側で定期的に通信し続ける架空のプラグイン（チャットやアクセス計測のポーリングのまね）。
+// 通信先は静的なファイルにする（PHP に向けると、CI の遅い Playground では処理が追いつかず、ページ本体の読み込みまで詰まる）。
+// 間隔は networkidle の判定（500ms 通信が無い）より短くし、ずっと止まらないようにする
+const pollingPlugin = (version) => makeZip('vrt-polling', {
+  'vrt-polling.php': `<?php
+/**
+ * Plugin Name: VRT Polling
+ * Version: ${version}
+ */
+add_action('wp_footer', function () {
+  echo '<script>setInterval(function () { fetch(' . wp_json_encode(plugins_url('ping.txt', __FILE__)) . ' + "?t=" + Date.now()); }, 300);</script>';
+});
+add_shortcode('vrt_polling_box', fn() => '<div style="width:200px;height:100px;background:red"></div>');
+`,
+  'ping.txt': 'pong',
+})
+
 describe('runVrt（Playground＋Chromium）', () => {
   let browser
   before(async () => {
@@ -180,6 +197,11 @@ describe('runVrt（Playground＋Chromium）', () => {
 
   it('処理の最後に何か出力するプラグインでも、導入の結果を読める', async () => {
     const r = await runVrt({ oldZip: trailingPlugin('1.0.0'), newZip: trailingPlugin('1.0.1') }, { browser, port: 9490 })
+    assert.equal(r.status, 'done')
+  })
+
+  it('表側で通信し続けるプラグインでも、時間切れにならずに撮れる', async () => {
+    const r = await runVrt({ oldZip: pollingPlugin('1.0.0'), newZip: pollingPlugin('1.0.1') }, { browser, port: 9491 })
     assert.equal(r.status, 'done')
   })
 

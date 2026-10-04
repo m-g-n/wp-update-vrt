@@ -3,3 +3,4 @@ work/
 .local-store/
 local-candidates.json
 *.zip
+.env.report

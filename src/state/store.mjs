@@ -22,6 +22,14 @@ export function createFsStore(root) {
     },
     putJSON: (p, obj) => put(p, JSON.stringify(obj, null, 2)),
     putFile: (p, buf) => put(p, buf),
+    async getBytes(p) {
+      try {
+        return await readFile(full(p))
+      } catch (err) {
+        if (err.code === 'ENOENT') return null
+        throw err
+      }
+    },
   }
 }
 
@@ -45,6 +53,16 @@ export function createR2Store({ accountId, bucket, accessKeyId, secretAccessKey,
     },
     putJSON: (p, obj) => put(p, JSON.stringify(obj), 'application/json'),
     putFile: (p, buf, contentType) => put(p, buf, contentType),
+    // 手元のレポート（src/cli/report.mjs）が画像を取るのに使う。無ければ null
+    async getBytes(p) {
+      try {
+        const res = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: safePath(p) }))
+        return Buffer.from(await res.Body.transformToByteArray())
+      } catch (err) {
+        if (err.name === 'NoSuchKey' || err.$metadata?.httpStatusCode === 404) return null
+        throw err
+      }
+    },
   }
 }
 

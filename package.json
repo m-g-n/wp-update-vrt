@@ -13,7 +13,8 @@
     "test:vrt": "node --test --test-concurrency=1 --test-timeout=1500000 'test-vrt/**/*.test.mjs'",
     "prepare-stage": "node src/cli/prepare.mjs",
     "vrt-stage": "node src/cli/vrt.mjs",
-    "publish-stage": "node src/cli/publish.mjs"
+    "publish-stage": "node src/cli/publish.mjs",
+    "report": "node --env-file-if-exists=.env.report src/cli/report.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1141.0",

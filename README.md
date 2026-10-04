@@ -20,6 +20,28 @@ export STORE_DIR=.local-store WORK_DIR=work INPUT_FILE=local-candidates.json TYP
 node src/cli/prepare.mjs && node src/cli/vrt.mjs && node src/cli/publish.mjs
 ```
 
+## 手元でレポートを見る
+
+Actions のログには組のハッシュ（`key_hash`）しか出さない。どのプラグインで VRT が走ったかは、
+非公開の R2 の結果から手元でレポートを作って見る。
+
+```bash
+npm run report               # 最新の日
+npm run report -- 2026-10-04 # その日
+```
+
+- 出力先は `../wp-update-vrt-reports/<日付>/index.html`（`REPORT_DIR` で変えられる）。リポジトリの中は指定できない
+- R2 の読み取り専用キーを `.env.report` に置く（Git には入らない）。managewp 用に作った読み取りトークンと同じでよい
+
+```
+R2_ACCOUNT_ID=...
+R2_BUCKET=wp-update-vrt-results
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+```
+
+レポートにはプラグイン名と版が入る。社外秘として扱い、公開リポジトリやチャットに貼らない。
+
 ## Actions の設定
 
 secrets: `MANAGEWP_CANDIDATES_URL` `MANAGEWP_TOKEN` `TYPESAFE_API_KEY` `R2_ACCOUNT_ID` `R2_BUCKET`
